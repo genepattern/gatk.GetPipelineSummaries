@@ -1,5 +1,6 @@
 # gatk.GetPileupSummaries (v1)
 
+
 **Description**: Tabulates pileup metrics — counts of reads supporting the reference allele, the alternate allele, and other alleles — at a set of common biallelic variant sites. The resulting table is the required input for GATK's CalculateContamination tool, which estimates cross-sample contamination in sequencing data.
 **Authors**: Broad Institute of MIT and Harvard; GenePattern Team, UC San Diego
 **Contact**: [GenePattern Community Forum](https://groups.google.com/g/genepattern-help)
