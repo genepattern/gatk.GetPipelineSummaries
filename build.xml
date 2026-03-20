@@ -6,7 +6,7 @@
 <target name="create-zip" depends="init">
     <antcall target="prezip"/>
     <zip destfile="${dest.dir}/${ant.project.name}.zip" whenempty="fail" defaultexcludes="true">
-        <fileset dir="." includes="manifest, gatk_getpileupsummaries_wrapper.sh, LICENSE"/>
+        <fileset dir="." includes="manifest, paramgroups.json, gatk_getpileupsummaries_wrapper.sh, LICENSE"/>
     </zip>
     <antcall target="postzip"/>
 </target>

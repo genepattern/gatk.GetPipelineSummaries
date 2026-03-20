@@ -1,0 +1,247 @@
+{
+  "tool_name": "gatk.GetPileupSummaries",
+  "module_directory": "generated-modules/gatk.getpileupsummaries_20260320_085944",
+  "research_complete": true,
+  "planning_complete": true,
+  "research_data": {
+    "research": "---\n\n# Comprehensive Research Report: `gatk.GetPileupSummaries`\n\n---\n\n## 1. Tool Purpose and Scientific Applications\n\n### Overview\n`GetPileupSummaries` is a GATK4 tool that **summarizes per-site read counts** supporting the reference allele, the first alternate allele, and any other alleles at genomic positions specified in a population variant VCF. Its sole purpose within the GATK ecosystem is to generate the allele-count table consumed by `CalculateContamination`, which then estimates cross-sample contamination fractions used to filter somatic variant calls.\n\n### Scientific Context\n| Aspect | Detail |\n|--------|--------|\n| **Primary Use** | Quantify allele support at common germline SNP sites as prerequisite for contamination estimation |\n| **Research Domain** | Cancer genomics, somatic variant calling, tumor sequencing QC |\n| **Biological Rationale** | At common heterozygous SNP sites, contaminating DNA introduces reads at unexpected allele ratios; counting these deviations reveals contamination fraction |\n| **Pipeline Role** | Step 2 (of 6) in GATK Best Practices somatic pipeline \u2014 after Mutect2, before CalculateContamination |\n| **Output Consumer** | `CalculateContamination` \u2192 `FilterMutectCalls` |\n\n### Key Applications\n- **Tumor contamination estimation**: Determine what fraction of tumor BAM reads originate from a different individual (cross-sample contamination)\n- **Matched normal contamination**: Run on both tumor and matched normal to improve contamination estimates\n- **Tumor-only workflows**: Run without matched normal using a population allele frequency resource\n- **Quality control**: Pre-analysis QC step before somatic variant interpretation\n- **Cohort-level QC**: Identify mislabeled or swapped samples in large sequencing studies\n\n---\n\n## 2. Input/Output Formats and Requirements\n\n### Input Files\n\n#### Required Input 1: Aligned Reads (`-I / --input`)\n| Property | Detail |\n|----------|--------|\n| **Formats** | BAM (`.bam`), SAM (`.sam`), CRAM (`.cram`) |\n| **Sorting** | Must be **coordinate-sorted** |\n| **Index** | `.bai` for BAM; `.crai` or `.csi` for CRAM \u2014 **must be co-located** |\n| **Multi-sample** | Allowed; use `--tumor-sample` to specify SM tag |\n| **Deduplication** | Recommended (MarkDuplicates) but not enforced |\n| **Base Quality Recalibration** | Recommended (BQSR) but not required |\n\n#### Required Input 2: Variant Sites VCF (`-V / --variant`)\n| Property | Detail |\n|----------|--------|\n| **Formats** | VCF (`.vcf`), bgzipped VCF (`.vcf.gz`), BCF (`.bcf`) |\n| **Index** | `.tbi` for VCF.gz; `.idx` for uncompressed VCF \u2014 **must be co-located** |\n| **Content** | Common germline SNP sites (AF > 5% recommended) |\n| **AF field** | `AF` INFO field used directly; if absent, MAF computed from genotypes |\n| **Recommended resources** | `small_exac_common_3.hg38.vcf.gz`, `af-only-gnomad.hg38.vcf.gz` |\n| **Genome build** | Must match the BAM reference (hg38/GRCh38 or hg19/GRCh37) |\n\n#### Required Input 3: Intervals (`-L / --intervals`)\n| Property | Detail |\n|----------|--------|\n| **Formats** | VCF, BED, Picard `.interval_list`, GATK strings (`chr1:1-1000`), `.list` files |\n| **Index** | Required when using a file (`.tbi` for VCF.gz intervals) \u2014 **must be co-located** |\n| **Common practice** | **Use the same file as `-V`** (variant VCF serves as both sites and intervals) |\n| **Purpose** | Restricts traversal to specified regions for efficiency |\n| **\u26a0\ufe0f Note** | Despite not always appearing in simplified documentation, **this argument is required** |\n\n#### Optional Input 4: Arguments File (`--arguments_file`)\n| Property | Detail |\n|----------|--------|\n| **Format** | Plain text; one argument/value pair per line |\n| **Use case** | Pass additional GATK parameters without explicit module parameters |\n\n### Output Files\n\n#### Primary Output: Pileup Summary Table (`-O / --output`)\n```\n#[GetPileupSummaries] ... version header ...\ncontig    position    ref_count    alt_count    other_alt_count    allele_frequency\nchr1      10000        45            3             1                 0.061\nchr1      20000        38            0             0                 0.023\nchr17     7674220     102            5             2                 0.048\n```\n\n| Column | Type | Description |\n|--------|------|-------------|\n| `contig` | String | Chromosome/scaffold name |\n| `position` | Integer | 1-based genomic position |\n| `ref_count` | Integer | Read count supporting reference allele |\n| `alt_count` | Integer | Read count supporting first alternate allele |\n| `other_alt_count` | Integer | Read count supporting any other allele |\n| `allele_frequency` | Float | Population AF from input VCF |\n\n**This table is the direct, unmodified input to `CalculateContamination`.**\n\n---\n\n## 3. Parameter Analysis and Usage Patterns\n\n### The Four Required Arguments\n\n```bash\ngatk GetPileupSummaries \\\n  -I  <input.bam>           \\   # Coordinate-sorted, indexed BAM\n  -V  <variants.vcf.gz>     \\   # Common SNP sites with AF\n  -L  <intervals.vcf.gz>    \\   # Genomic intervals (often same as -V)\n  -O  <output.table>            # Output pileup summary table\n```\n\n### Key Optional Parameters\n\n| Parameter | Default | Biological Significance |\n|-----------|---------|------------------------|\n| `--tumor-sample` | null | SM tag from BAM header; required for multi-sample BAMs |\n| `--max-depth-per-sample` | 200 | Higher values improve sensitivity but increase memory; for deeply sequenced tumors consider increasing |\n| `--interval-padding` | 0 | Adds flanking bases around each interval |\n| `--interval-set-rule` | UNION | UNION or INTERSECTION when multiple -L provided |\n| `--read-validation-stringency` | SILENT | STRICT will fail on malformed reads; SILENT ignores them |\n| `--disable-sequence-dictionary-validation` | false | Use if BAM/VCF headers have compatible but non-identical contigs |\n| `--tmp-dir` | system | Specify for HPC environments with limited /tmp |\n| `--arguments_file` | null | Pass additional arguments; the GenePattern module's escape valve |\n\n### Parameter Groups for GenePattern UI\n\n```\nGROUP 1 \u2014 Required Inputs (always shown):\n  input.bam, input.bai, variant.vcf.gz, variant.vcf.gz.tbi,\n  intervals.file, intervals.index, output.file.name\n\nGROUP 2 \u2014 Sample Options (advanced):\n  --tumor-sample, --max-depth-per-sample\n\nGROUP 3 \u2014 Additional Arguments (advanced):\n  --arguments_file (for any other GATK options)\n```\n\n---\n\n## 4. Installation and Dependency Requirements\n\n### Runtime Dependencies\n| Component | Version | Notes |\n|-----------|---------|-------|\n| **Java** | 8+ (GATK 4.0\u20134.2); Java 17 supported in GATK 4.3+ | JRE sufficient; JDK not needed |\n| **GATK4 JAR** | 4.4.0.0 (latest stable) | All Picard/HTSJDK/Tribble bundled |\n| **Samtools** | Optional | For pre-processing; not needed at runtime |\n\n### Docker (Recommended for GenePattern)\n```bash\n# Official Broad image (recommended)\ndocker pull broadinstitute/gatk:latest\ndocker pull broadinstitute/gatk:4.4.0.0\n\n# Run GATK within container\ndocker run --rm -v /data:/data broadinstitute/gatk:4.4.0.0 \\\n  gatk GetPileupSummaries -I /data/tumor.bam ...\n```\n\n### Conda Installation\n```bash\nconda install -c bioconda gatk4\n# or\nconda create -n gatk4 -c bioconda gatk4\n```\n\n### Direct Download\n```bash\n# From GitHub releases\nwget https://github.com/broadinstitute/gatk/releases/download/4.4.0.0/gatk-4.4.0.0.zip\nunzip gatk-4.4.0.0.zip\n./gatk-4.4.0.0/gatk GetPileupSummaries --help\n```\n\n### System Resources\n| Resource | Minimum | Recommended |\n|----------|---------|-------------|\n| RAM | 4 GB | 8\u201316 GB (WGS) |\n| CPU | 1 core | 2\u20134 cores (Java GC benefit) |\n| Disk I/O | HDD | SSD strongly preferred |\n| Runtime (WES) | ~15 min | ~30 min |\n| Runtime (WGS) | ~2 hr | ~4 hr |\n\n---\n\n## 5. Common Workflows and Use Cases\n\n### Primary Workflow: GATK4 Somatic Best Practices Pipeline\n\n```\nBAM (tumor) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2510\n                                               \u25bc\n                                   GetPileupSummaries (tumor) \u2500\u2500\u2510\n                                                                  \u25bc\nBAM (normal, optional) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u25baGetPileupSummaries (normal)\u2500\u2500\u25baCalculateContamination\u2500\u2500\u25baFilterMutectCalls\n                                                                                                              \u25b2\nBAM (tumor) \u2500\u2500\u25ba Mutect2 \u2500\u2500\u25ba raw.vcf \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2518\n```\n\n### Workflow Step-by-Step\n\n```bash\n# Step 1: Mutect2 somatic calling\ngatk Mutect2 -R ref.fa -I tumor.bam -I normal.bam \\\n  -normal NORMAL_SM -O somatic_raw.vcf.gz ...\n\n# Step 2a: GetPileupSummaries on tumor\ngatk GetPileupSummaries \\\n  -I tumor.bam \\\n  -V small_exac_common_3.hg38.vcf.gz \\\n  -L small_exac_common_3.hg38.vcf.gz \\\n  -O tumor_pileups.table\n\n# Step 2b: GetPileupSummaries on matched normal (optional but improves accuracy)\ngatk GetPileupSummaries \\\n  -I normal.bam \\\n  -V small_exac_common_3.hg38.vcf.gz \\\n  -L small_exac_common_3.hg38.vcf.gz \\\n  -O normal_pileups.table\n\n# Step 3: CalculateContamination\ngatk CalculateContamination \\\n  -I tumor_pileups.table \\\n  -matched normal_pileups.table \\\n  -O contamination.table \\\n  --tumor-segmentation segments.table\n\n# Step 4: FilterMutectCalls\ngatk FilterMutectCalls \\\n  -R ref.fa -V somatic_raw.vcf.gz \\\n  --contamination-table contamination.table \\\n  --tumor-segmentation segments.table \\\n  -O somatic_filtered.vcf.gz\n```\n\n### Test Data Pattern (from provided example)\nThe test data provided (`normal.bam`, `chr17_small_exac_common_3_grch38.vcf.gz`, `.tbi`) represents a **chr17-restricted ExAC common variants resource** typical of WES pilot testing. The VCF serves as **both `-V` and `-L`**, which is the standard GATK practice.\n\n---\n\n## 6. GenePattern Integration \u2014 Critical Implementation Details\n\n### \u26a0\ufe0f Critical File Staging Architecture\n\nBecause GATK requires index files to be **co-located** with their parent files in the **same directory**, and the GenePattern input staging directory **may be read-only**, all input files must be **copied to the writable job working directory** before invoking GATK.\n\n#### Complete Wrapper Script Template\n\n```bash\n#!/bin/bash\nset -euo pipefail\n\n# \u2500\u2500 GenePattern parameter bindings \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nBAM_FILE=\"$1\"        # input BAM file\nBAI_FILE=\"$2\"        # BAM index (.bai)\nVCF_FILE=\"$3\"        # variant sites VCF (.vcf.gz)\nVCF_TBI_FILE=\"$4\"    # VCF tabix index (.vcf.gz.tbi)\nINTERVALS_FILE=\"$5\"  # intervals file (may be same as VCF)\nINTERVALS_TBI=\"$6\"   # intervals index (.vcf.gz.tbi)\nOUTPUT_NAME=\"${7:-pileup_summary.table}\"   # output file name\nARGS_FILE=\"${8:-}\"   # optional arguments file\n\n# \u2500\u2500 Staged local paths in writable working directory \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nLOCAL_BAM=\"$PWD/staged_input.bam\"\nLOCAL_BAI=\"$PWD/staged_input.bam.bai\"\nLOCAL_VCF=\"$PWD/staged_variants.vcf.gz\"\nLOCAL_VCF_TBI=\"$PWD/staged_variants.vcf.gz.tbi\"\nLOCAL_INTERVALS=\"$PWD/staged_intervals.vcf.gz\"\nLOCAL_INTERVALS_TBI=\"$PWD/staged_intervals.vcf.gz.tbi\"\n\n# \u2500\u2500 Cleanup trap: always runs on EXIT (success or failure) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ntrap 'echo \"Cleaning up staged files...\"; \\\n      rm -f \"$LOCAL_BAM\" \"$LOCAL_BAI\" \\\n            \"$LOCAL_VCF\" \"$LOCAL_VCF_TBI\" \\\n            \"$LOCAL_INTERVALS\" \"$LOCAL_INTERVALS_TBI\"' EXIT\n\n# \u2500\u2500 Stage files into writable working directory \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\necho \"Staging BAM and index...\"\ncp \"$BAM_FILE\" \"$LOCAL_BAM\"\ncp \"$BAI_FILE\" \"$LOCAL_BAI\"\n\necho \"Staging VCF and index...\"\ncp \"$VCF_FILE\" \"$LOCAL_VCF\"\ncp \"$VCF_TBI_FILE\" \"$LOCAL_VCF_TBI\"\n\necho \"Staging intervals and index...\"\ncp \"$INTERVALS_FILE\" \"$LOCAL_INTERVALS\"\ncp \"$INTERVALS_TBI\" \"$LOCAL_INTERVALS_TBI\"\n\n# \u2500\u2500 Build GATK command \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nGATK_ARGS=(\n  GetPileupSummaries\n  -I  \"$LOCAL_BAM\"\n  -V  \"$LOCAL_VCF\"\n  -L  \"$LOCAL_INTERVALS\"\n  -O  \"$OUTPUT_NAME\"\n)\n\nif [[ -n \"$ARGS_FILE\" ]]; then\n  GATK_ARGS+=(--arguments_file \"$ARGS_FILE\")\nfi\n\n# \u2500\u2500 Execute \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\necho \"Running GATK GetPileupSummaries...\"\ngatk \"${GATK_ARGS[@]}\"\n\necho \"Done. Output written to: $OUTPUT_NAME\"\n```\n\n### GenePattern Module Manifest Parameters\n\n| GP Param Name | Type | Required | GATK Flag | Notes |\n|--------------|------|----------|-----------|-------|\n| `input.bam` | File | \u2705 | `-I` (staged) | `.bam` file |\n| `input.bai` | File | \u2705 | staged with BAM | `.bai` index; staged as `staged_input.bam.bai` |\n| `variant.vcf.gz` | File | \u2705 | `-V` (staged) | bgzipped VCF with AF annotations |\n| `variant.vcf.gz.tbi` | File | \u2705 | staged with VCF | `.tbi` tabix index |\n| `intervals.file` | File | \u2705 | `-L` (staged) | Can be same file as `variant.vcf.gz` |\n| `intervals.index` | File | \u2705 | staged with intervals | `.tbi` or `.idx` index |\n| `output.file.name` | String | \u2705 | `-O` | Default: `pileup_summary.table` |\n| `arguments.file` | File | \u274c | `--arguments_file` | Pass any additional GATK args |\n\n### File Index Co-location Rules\n\n```\n\u2705 CORRECT: Both BAM and BAI in same directory\n  $PWD/staged_input.bam\n  $PWD/staged_input.bam.bai    \u2190 GATK auto-discovers this\n\n\u2705 CORRECT: VCF and TBI in same directory  \n  $PWD/staged_variants.vcf.gz\n  $PWD/staged_variants.vcf.gz.tbi   \u2190 GATK auto-discovers this\n\n\u2705 CORRECT: Intervals and index in same directory\n  $PWD/staged_intervals.vcf.gz\n  $PWD/staged_intervals.vcf.gz.tbi   \u2190 GATK auto-discovers this\n\n\u274c WRONG: Staging to read-only input directory\n  /data/input_staging/input.bam     \u2190 May not be writable\n  /data/input_staging/input.bam.bai \u2190 Cannot write index here\n```\n\n---\n\n## 7. Comparative Ecosystem Analysis\n\n### Tool Positioning\n\n| Tool | Role in Somatic Pipeline | Relationship to GetPileupSummaries |\n|------|-------------------------|-------------------------------------|\n| **GetPileupSummaries** | Allele count collection | **Target tool** |\n| **CalculateContamination** | Contamination fraction estimation | Direct downstream consumer |\n| **FilterMutectCalls** | Somatic variant filtering | Uses contamination output |\n| **Mutect2** | Somatic variant calling | Upstream; its output is filtered using contamination |\n| **VerifyBamID2** | Alternative contamination method | SVD-based; no VCF sites required; not part of GATK pipeline |\n| **CollectAllelicCounts** | Allele counting for CNV analysis | Similar mechanism; different purpose (CNV vs contamination) |\n| **Samtools mpileup** | General pileup | Predecessor approach; requires custom parsing |\n\n### Why GetPileupSummaries for GenePattern?\n- **Native GATK4 integration**: Output format is precisely what `CalculateContamination` expects \u2014 no conversion\n- **Standard of care**: Required step in GATK Mutect2 somatic Best Practices pipeline, used by thousands of cancer genomics studies\n- **Simple parameterization**: Only 4 required arguments (+ 3 index files)\n- **Well-validated**: Peer-reviewed across TCGA, PCAWG, and clinical sequencing contexts\n- **Dockerized**: `broadinstitute/gatk:latest` provides a fully self-contained, portable environment\n\n---\n\n## 8. Known Issues and Caveats\n\n| Issue | Details | Mitigation |\n|-------|---------|------------|\n| **Index co-location** | GATK refuses to run if index not in same directory as parent file | Stage both files to working directory (implemented in wrapper) |\n| **Read-only staging** | GenePattern input staging may be read-only | Copy to `$PWD` before execution; use trap for cleanup |\n| **Intervals required** | `-L` is required even though some documentation omits it | Always include intervals parameter in module |\n| **Reference genome mismatch** | BAM and VCF must use same genome build | Document supported builds; validate contig names |\n| **Low-coverage sites** | Sites with zero coverage are silently excluded from output | Normal behavior; downstream tools handle sparse tables |\n| **Multi-sample BAM** | Without `--tumor-sample`, tool processes all reads | Expose `--tumor-sample` as optional parameter |\n| **Java version** | GATK 4.3+ requires Java 11+; earlier versions need Java 8 | Pin Docker image to specific GATK version |\n| **Memory** | WGS with high-coverage BAM may require >8GB | Set JVM `-Xmx` via `--java-options` |\n| **Temp disk space** | Large BAMs create substantial temp files | Set `--tmp-dir` to a location with sufficient space |\n\n---\n\n## 9. Resource Files and References\n\n### GATK Resource Bundle (Common Variant Sites)\n```\n# GRCh38/hg38\ngs://gatk-best-practices/somatic-hg38/small_exac_common_3.hg38.vcf.gz\ngs://gatk-best-practices/somatic-hg38/af-only-gnomad.hg38.vcf.gz\n\n# GRCh37/hg19\ngs://gatk-best-practices/somatic-b37/small_exac_common_3_b37.vcf.gz\n\n# Public HTTP access\nhttps://console.cloud.google.com/storage/browser/genomics-public-data/resources/broad/hg38/v0\n```\n\n### Key References\n1. **GATK Best Practices**: Van der Auwera & O'Connor, *Genomics in the Cloud* (O'Reilly, 2020)\n2. **Somatic Pipeline Paper**: Cibulskis et al., *Nature Biotechnology* 31, 213\u2013219 (2013) \u2014 MuTect (predecessor)\n3. **GATK4 Framework**: DePristo et al., *Nature Genetics* 43, 491\u2013498 (2011)\n4. **Official Tool Docs**: https://gatk.broadinstitute.org/hc/en-us/articles/360037593451-GetPileupSummaries\n5. **WDL Workflow**: https://github.com/broadinstitute/gatk/blob/master/scripts/mutect2_wdl/mutect2.wdl\n6. **Docker Hub**: https://hub.docker.com/r/broadinstitute/gatk\n\n---\n\n## 10. Summary Checklist for GenePattern Module Development\n\n```\n\u25a1 PARAMETERS (4 required GATK args + 3 paired index files + 1 output name)\n  \u2611 -I  input.bam         \u2192 paired with input.bai\n  \u2611 -V  variant.vcf.gz    \u2192 paired with variant.vcf.gz.tbi\n  \u2611 -L  intervals.file    \u2192 paired with intervals.index\n  \u2611 -O  output.file.name  \u2192 string, default \"pileup_summary.table\"\n  \u2611 --arguments_file      \u2192 optional, for additional GATK args\n\n\u25a1 WRAPPER SCRIPT REQUIREMENTS\n  \u2611 Stage BAM + BAI to $PWD before GATK invocation\n  \u2611 Stage VCF + TBI to $PWD before GATK invocation\n  \u2611 Stage intervals + index to $PWD before GATK invocation\n  \u2611 trap 'rm -f ...' EXIT for guaranteed cleanup on success OR failure\n  \u2611 Pass local $PWD copies to GATK -I, -V, -L flags\n  \u2611 NEVER write indexes to input staging directory\n\n\u25a1 DOCKER / RUNTIME\n  \u2611 Use broadinstitute/gatk:4.4.0.0 (or :latest)\n  \u2611 Java heap: configure via --java-options \"-Xmx4g\" (or higher for WGS)\n\n\u25a1 TESTING\n  \u2611 Test data: normal.bam + chr17_small_exac_common_3_grch38.vcf.gz + .tbi\n  \u2611 Use VCF as both -V and -L (standard GATK pattern)\n  \u2611 Verify output .table has correct 6-column format\n  \u2611 Verify output is parseable by CalculateContamination\n```"
+  },
+  "artifacts_status": {
+    "wrapper": {
+      "generated": true,
+      "validated": true,
+      "attempts": 1,
+      "errors": []
+    },
+    "manifest": {
+      "generated": true,
+      "validated": true,
+      "attempts": 2,
+      "errors": [
+        "Validation failed: Running modular tests on manifest: generated-modules/gatk.getpileupsummaries_20260320_085944/manifest\n  Test 'Test Author Field': PASSED\n  Test 'Test Basic Keyvalue': PASSED\n  Test 'Test Commandline': PASSED\n  Test 'Test Cpu Type': PASSED\n  Test 'Test Description Field': PASSED\n  Test 'Test Docker Image': PASSED\n  Test 'Test Duplicate Flags': 1 error(s) found\n  Test 'Test Duplicate Keys': PASSED\n  Test 'Test File Format': PASSED\n  Test 'Test Jvm Level': PASSED\n  Test 'Test Language Field': PASSED\n  Test 'Test Lsid Format': PASSED\n  Test 'Test Memory Spec': PASSED\n  Test 'Test Module Name': PASSED\n  Test 'Test Non Ascii': PASSED\n  Test 'Test Os Field': PASSED\n  Test 'Test Parameter Attributes': PASSED\n  Test 'Test Parameter Numbering': PASSED\n  Test 'Test Prefix Flag Consistency': 1 error(s) found\n  Test 'Test Privacy Level': PASSED\n  Test 'Test Quality Level': PASSED\n  Test 'Test Required Keys': PASSED\n  Test 'Test Task Type': PASSED\n  Test 'Test Url Fields': PASSED\n  Test 'Test Version Field': PASSED\n  Test 'Test Wrapper Consistency': 1 issue(s) found\n  Test 'Test Wrapper Flag Consistency': PASSED\n\nRan 27 test module(s)\n\nFAIL: Manifest 'generated-modules/gatk.getpileupsummaries_20260320_085944/manifest' failed 2 checks:\nERROR: Line 78: Parameter p7 'output.file.name': flag '--output.file.name' appears both inline in commandLine AND in p7_prefix_when_specified ('--output.file.name'). The flag will be passed twice. Remove it from whichever location is not intended.\n   > p7_prefix_when_specified=--output.file.name\nERROR: Line 9: Parameter p7 'output.file.name': prefix_when_specified is '--output.file.name' but the commandLine also has inline flag '--output.file.name' before <output.file.name>. This will produce a duplicated flag at runtime. Remove the inline flag from commandLine and use only the bare placeholder <output.file.name>.\n   > commandLine=bash <libdir>gatk_getpileupsummaries_wrapper.sh --input.bam <input.bam> --input.bai <input.bai> --variant.vcf <variant.vcf> --variant.vcf.tbi <variant.vcf.tbi> --intervals.file <intervals.file> --intervals.index <intervals.index> --output.file.name <output.file.name> <arguments.file>\nINFO: Line N/A: Wrapper consistency check skipped: unsupported wrapper language (.sh).\n"
+      ]
+    },
+    "paramgroups": {
+      "generated": true,
+      "validated": true,
+      "attempts": 1,
+      "errors": []
+    },
+    "gpunit": {
+      "generated": true,
+      "validated": true,
+      "attempts": 2,
+      "errors": [
+        "Validation failed: Running modular tests on GPUnit file: generated-modules/gatk.getpileupsummaries_20260320_085944/test.yml\n  Test 'Test File Validation': PASSED\n  Test 'Test Structure Validation': PASSED\n  Test 'Test Module Validation': 1 warning(s) found\n  Test 'Test Parameter Validation': 6 error(s) found\n  Test 'Test Parameter Type Validation': PASSED\n  Test 'Test File Parameter Exist': PASSED\nRan 6 test module(s)\n\nFAIL: GPUnit file 'generated-modules/gatk.getpileupsummaries_20260320_085944/test.yml' failed 6 checks and has 1 warning:\nWARNING: Module name case mismatch: expected 'GATK.GetPileupSummaries', found 'gatk.GetPileupSummaries'\nERROR: Unexpected parameter 'input_bam' found in GPUnit file (Parameter not in expected parameters list)\nERROR: Unexpected parameter 'input_bam_index' found in GPUnit file (Parameter not in expected parameters list)\nERROR: Unexpected parameter 'intervals' found in GPUnit file (Parameter not in expected parameters list)\nERROR: Unexpected parameter 'intervals_index' found in GPUnit file (Parameter not in expected parameters list)\nERROR: Unexpected parameter 'variant_vcf' found in GPUnit file (Parameter not in expected parameters list)\nERROR: Unexpected parameter 'variant_vcf_index' found in GPUnit file (Parameter not in expected parameters list)\n"
+      ]
+    },
+    "documentation": {
+      "generated": true,
+      "validated": true,
+      "attempts": 1,
+      "errors": []
+    },
+    "dockerfile": {
+      "generated": true,
+      "validated": true,
+      "skipped": true,
+      "attempts": 0,
+      "errors": []
+    }
+  },
+  "error_messages": [],
+  "input_tokens": 400117,
+  "output_tokens": 56169,
+  "estimated_cost": 2.042886,
+  "example_data": [
+    {
+      "original": "/Users/liefeld/Desktop/gatk/normal.bam",
+      "resolved": "/Users/liefeld/Desktop/gatk/normal.bam",
+      "is_url": false,
+      "extension": ".bam",
+      "filename": "normal.bam",
+      "local_path": "/Users/liefeld/Desktop/gatk/normal.bam",
+      "hint": null
+    },
+    {
+      "original": "/Users/liefeld/Desktop/gatk/chr17_small_exac_common_3_grch38.vcf.gz",
+      "resolved": "/Users/liefeld/Desktop/gatk/chr17_small_exac_common_3_grch38.vcf.gz",
+      "is_url": false,
+      "extension": ".gz",
+      "filename": "chr17_small_exac_common_3_grch38.vcf.gz",
+      "local_path": "/Users/liefeld/Desktop/gatk/chr17_small_exac_common_3_grch38.vcf.gz",
+      "hint": null
+    },
+    {
+      "original": "/Users/liefeld/Desktop/gatk/chr17_small_exac_common_3_grch38.vcf.gz.tbi",
+      "resolved": "/Users/liefeld/Desktop/gatk/chr17_small_exac_common_3_grch38.vcf.gz.tbi",
+      "is_url": false,
+      "extension": ".tbi",
+      "filename": "chr17_small_exac_common_3_grch38.vcf.gz.tbi",
+      "local_path": "/Users/liefeld/Desktop/gatk/chr17_small_exac_common_3_grch38.vcf.gz.tbi",
+      "hint": null
+    }
+  ],
+  "escalation_counts": {},
+  "escalation_log": [],
+  "planning_data": {
+    "module_name": "GATK.GetPileupSummaries",
+    "description": "Summarizes counts of reads that support reference, alternate, and other alleles for given sites. Results can be used with CalculateContamination to estimate cross-sample contamination fractions, which are then used to filter somatic variant calls produced by Mutect2. This tool is step 2 in the GATK4 Best Practices somatic variant calling pipeline.",
+    "author": "GenePattern Team",
+    "input_file_formats": [
+      "BAM",
+      "SAM",
+      "CRAM",
+      "VCF",
+      "VCF.GZ",
+      "BCF",
+      "BED",
+      "TBI"
+    ],
+    "language": "Java",
+    "categories": [
+      "Variant Analysis",
+      "Somatic Variant Calling",
+      "Quality Control"
+    ],
+    "cpu_cores": 2,
+    "memory": "8GB",
+    "lsid": "urn:lsid:broad.mit.edu:cancer.software.genepattern.module.generated:37981:1",
+    "plan": "## GATK.GetPileupSummaries \u2014 GenePattern Module Plan\n\n---\n\n### 1. Module Overview\n\n**Tool**: GATK4 GetPileupSummaries\n**GenePattern Module Name**: GATK.GetPileupSummaries\n**Version**: 1 (production)\n**Docker Image**: broadinstitute/gatk:4.1.4.1\n**LSID**: urn:lsid:broad.mit.edu:cancer.software.genepattern.module.generated:37981:1\n**Language**: Java (invoked via bash wrapper calling the `gatk` CLI)\n**Author**: GenePattern Team\n**Categories**: Variant Analysis, Somatic Variant Calling, Quality Control\n\n**Scientific Summary**:\nGetPileupSummaries tabulates, at each of a set of common germline SNP sites, the number of reads supporting the reference allele, the first alternate allele, and any other allele. This allele count table is consumed directly by CalculateContamination, which estimates the fraction of reads in a tumor (or normal) BAM that originate from a contaminating individual. This contamination estimate is then applied by FilterMutectCalls to remove spurious somatic variant calls. The tool is Step 2 of the GATK4 Best Practices Somatic Variant Calling Pipeline.\n\n---\n\n### 2. Module Architecture\n\n#### 2.1 Wrapper Script: `gatk_getpileupsummaries_wrapper.sh`\nThe wrapper is a bash script because GATK is a Java/JVM tool invoked through its CLI. The script:\n1. Parses named command-line arguments (--input.bam, --input.bai, etc.)\n2. Stages all input files + indexes into the writable job working directory ($PWD)\n3. Registers a trap on EXIT to clean up staged files regardless of success/failure\n4. Builds and executes the `gatk GetPileupSummaries` command using the staged local copies\n5. Optionally passes an --arguments_file for advanced GATK options\n\n#### 2.2 Complete Wrapper Script (gatk_getpileupsummaries_wrapper.sh)\n```bash\n#!/bin/bash\nset -euo pipefail\n\n# \u2500\u2500 Parse named arguments \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nBAM_FILE=\"\"\nBAI_FILE=\"\"\nVCF_FILE=\"\"\nVCF_TBI_FILE=\"\"\nINTERVALS_FILE=\"\"\nINTERVALS_INDEX=\"\"\nOUTPUT_NAME=\"pileup_summary.table\"\nARGS_FILE=\"\"\n\nwhile [[ $# -gt 0 ]]; do\n  case \"$1\" in\n    --input.bam)        BAM_FILE=\"$2\";        shift 2 ;;\n    --input.bai)        BAI_FILE=\"$2\";        shift 2 ;;\n    --variant.vcf)      VCF_FILE=\"$2\";        shift 2 ;;\n    --variant.vcf.tbi)  VCF_TBI_FILE=\"$2\";    shift 2 ;;\n    --intervals.file)   INTERVALS_FILE=\"$2\";  shift 2 ;;\n    --intervals.index)  INTERVALS_INDEX=\"$2\"; shift 2 ;;\n    --output.file.name) OUTPUT_NAME=\"$2\";     shift 2 ;;\n    --arguments.file)   ARGS_FILE=\"$2\";       shift 2 ;;\n    *) echo \"Unknown argument: $1\" >&2; shift ;;\n  esac\ndone\n\n# \u2500\u2500 Staged local paths \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nLOCAL_BAM=\"$PWD/staged_input.bam\"\nLOCAL_BAI=\"$PWD/staged_input.bam.bai\"\nLOCAL_VCF=\"$PWD/staged_variants.vcf.gz\"\nLOCAL_VCF_TBI=\"$PWD/staged_variants.vcf.gz.tbi\"\nLOCAL_INTERVALS=\"$PWD/staged_intervals.vcf.gz\"\nLOCAL_INTERVALS_TBI=\"$PWD/staged_intervals.vcf.gz.tbi\"\n\n# \u2500\u2500 Cleanup trap \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\ntrap 'echo \"Cleaning up staged files...\"; \\\n      rm -f \"$LOCAL_BAM\" \"$LOCAL_BAI\" \\\n            \"$LOCAL_VCF\" \"$LOCAL_VCF_TBI\" \\\n            \"$LOCAL_INTERVALS\" \"$LOCAL_INTERVALS_TBI\"' EXIT\n\n# \u2500\u2500 Stage files \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\necho \"Staging BAM and index...\"\ncp \"$BAM_FILE\" \"$LOCAL_BAM\"\ncp \"$BAI_FILE\" \"$LOCAL_BAI\"\n\necho \"Staging VCF and index...\"\ncp \"$VCF_FILE\" \"$LOCAL_VCF\"\ncp \"$VCF_TBI_FILE\" \"$LOCAL_VCF_TBI\"\n\necho \"Staging intervals file and index...\"\ncp \"$INTERVALS_FILE\" \"$LOCAL_INTERVALS\"\ncp \"$INTERVALS_INDEX\" \"$LOCAL_INTERVALS_TBI\"\n\n# \u2500\u2500 Build GATK command \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nGATK_ARGS=(\n  GetPileupSummaries\n  -I  \"$LOCAL_BAM\"\n  -V  \"$LOCAL_VCF\"\n  -L  \"$LOCAL_INTERVALS\"\n  -O  \"$OUTPUT_NAME\"\n)\n\nif [[ -n \"$ARGS_FILE\" ]]; then\n  GATK_ARGS+=(--arguments_file \"$ARGS_FILE\")\nfi\n\n# \u2500\u2500 Execute GATK \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\necho \"Running GATK GetPileupSummaries...\"\ngatk \"${GATK_ARGS[@]}\"\n\necho \"Done. Output written to: $OUTPUT_NAME\"\n```\n\n---\n\n### 3. Parameter Definitions\n\nAll parameters follow GenePattern naming conventions (lowercase, dot-separated).\n\n#### GROUP 1: Required Input Files\n\n**input.bam** (File, Required)\n- GATK flag: -I / --input\n- Accepted formats: BAM, SAM, CRAM\n- Must be coordinate-sorted\n- Must have a corresponding index file provided via input.bai\n- Example: normal.bam\n\n**input.bai** (File, Required)\n- Not a direct GATK flag; staged as co-located index\n- Accepted formats: BAI, CRAI, CSI\n- Must correspond exactly to input.bam\n- Staged to $PWD/staged_input.bam.bai alongside the BAM\n- Example: normal.bai\n\n**variant.vcf** (File, Required)\n- GATK flag: -V / --variant\n- Accepted formats: VCF, VCF.GZ (bgzipped), BCF\n- Must contain AF INFO field with population allele frequencies\n- Must be indexed (see variant.vcf.tbi)\n- Recommended: small_exac_common_3.hg38.vcf.gz (GATK resource bundle)\n- Example: chr17_small_exac_common_3_grch38.vcf.gz\n\n**variant.vcf.tbi** (File, Required)\n- Not a direct GATK flag; staged as co-located index\n- Accepted formats: TBI, IDX\n- Must correspond exactly to variant.vcf\n- Staged to $PWD/staged_variants.vcf.gz.tbi alongside the VCF\n- Example: chr17_small_exac_common_3_grch38.vcf.gz.tbi\n\n**intervals.file** (File, Required)\n- GATK flag: -L / --intervals\n- Accepted formats: VCF, VCF.GZ, BED, LIST, INTERVAL_LIST\n- REQUIRED even though not always documented as such\n- Standard practice: use the same file as variant.vcf\n- Must be indexed (see intervals.index)\n\n**intervals.index** (File, Required)\n- Not a direct GATK flag; staged as co-located index\n- Accepted formats: TBI, IDX\n- Must correspond exactly to intervals.file\n- Staged to $PWD/staged_intervals.vcf.gz.tbi alongside the intervals file\n\n#### GROUP 2: Output\n\n**output.file.name** (Text, Required)\n- GATK flag: -O / --output\n- Default: pileup_summary.table\n- Output format: tab-separated with columns: contig, position, ref_count, alt_count, other_alt_count, allele_frequency\n- Used directly as input to GATK CalculateContamination\n\n#### GROUP 3: Advanced Options\n\n**arguments.file** (File, Optional)\n- GATK flag: --arguments_file\n- Plain text file, one argument or key=value per line\n- For passing any GATK options not exposed in the UI, e.g.:\n  --tumor-sample MY_SAMPLE_NAME\n  --max-depth-per-sample 500\n  --java-options -Xmx16g\n  --tmp-dir /tmp/gatk\n\n---\n\n### 4. Command Line\n\n```\nbash <libdir>gatk_getpileupsummaries_wrapper.sh \\\n  --input.bam <input.bam> \\\n  --input.bai <input.bai> \\\n  --variant.vcf <variant.vcf> \\\n  --variant.vcf.tbi <variant.vcf.tbi> \\\n  --intervals.file <intervals.file> \\\n  --intervals.index <intervals.index> \\\n  --output.file.name <output.file.name> \\\n  <arguments.file>\n```\n\nNote: arguments.file uses prefix_only_if_value=true, so GenePattern only includes the --arguments.file flag when the user provides a value.\n\n---\n\n### 5. File Staging Architecture (CRITICAL)\n\nGATK requires BAM, VCF, and intervals index files to reside in the SAME DIRECTORY as their parent files. GenePattern's input staging directory may be read-only, so:\n\n1. ALL files (BAM+BAI, VCF+TBI, intervals+index) are copied into $PWD (the writable job working directory)\n2. GATK is invoked with the local $PWD copies\n3. A bash `trap EXIT` ensures cleanup of ALL staged files whether GATK succeeds or fails\n4. The output table is written directly to $PWD (the job working directory) and is NOT cleaned up\n\nStaged file naming convention:\n- $PWD/staged_input.bam      \u2190 BAM\n- $PWD/staged_input.bam.bai  \u2190 BAI (GATK discovers this automatically)\n- $PWD/staged_variants.vcf.gz      \u2190 VCF\n- $PWD/staged_variants.vcf.gz.tbi  \u2190 TBI (GATK discovers automatically)\n- $PWD/staged_intervals.vcf.gz     \u2190 intervals\n- $PWD/staged_intervals.vcf.gz.tbi \u2190 intervals index (GATK discovers automatically)\n\n---\n\n### 6. Output Format\n\nThe output pileup summary table (default: pileup_summary.table) is a tab-separated file with the following columns:\n\n| Column | Type | Description |\n|--------|------|-------------|\n| contig | String | Chromosome/scaffold |\n| position | Integer | 1-based genomic position |\n| ref_count | Integer | Reads supporting reference allele |\n| alt_count | Integer | Reads supporting first alternate allele |\n| other_alt_count | Integer | Reads supporting any other allele |\n| allele_frequency | Float | Population AF from variant VCF |\n\nThis table is the direct, unmodified input to GATK CalculateContamination.\n\n---\n\n### 7. Docker and Runtime Requirements\n\n- **Docker Image**: broadinstitute/gatk:4.1.4.1 (use EXACTLY as specified)\n- **CPU**: 2 cores (Java GC benefits from multiple cores)\n- **Memory**: 8 GB (4 GB for WES; 8-16 GB recommended for WGS)\n- **Runtime**: ~15-30 min WES; ~2-4 hr WGS\n- **Java**: Bundled in GATK Docker image\n- Note: For high-coverage WGS or deeply sequenced samples, users can increase JVM heap via --java-options \"-Xmx16g\" in an arguments.file\n\n---\n\n### 8. Validation and Testing\n\n#### Test Data\n- normal.bam (chr17-restricted, coordinate sorted)\n- chr17_small_exac_common_3_grch38.vcf.gz (common ExAC variants on chr17, GRCh38)\n- chr17_small_exac_common_3_grch38.vcf.gz.tbi (tabix index)\n- Use the VCF as BOTH variant.vcf AND intervals.file (standard GATK pattern)\n- Use the TBI as BOTH variant.vcf.tbi AND intervals.index\n\n#### Test Validation Criteria\n1. Output file exists and is non-empty\n2. Output has exactly 6 tab-separated columns\n3. Header line starts with #[GetPileupSummaries]\n4. allele_frequency column contains values between 0 and 1\n5. All staged files are cleaned up after completion\n6. Output is parseable by gatk CalculateContamination\n\n#### Error Cases to Test\n- Missing BAI file \u2192 GATK should fail with clear error\n- Read-only staging directory \u2192 wrapper must still succeed via $PWD staging\n- GATK failure \u2192 trap must still clean up staged files\n- Empty arguments.file \u2192 no --arguments_file flag should be passed\n\n---\n\n### 9. Pipeline Context\n\n```\nBAM (tumor/normal)\n       \u2502\n       \u25bc\n[GATK.GetPileupSummaries]  \u2190 This module\n       \u2502 pileup_summary.table\n       \u25bc\n[GATK.CalculateContamination]\n       \u2502 contamination.table + segments.table\n       \u25bc\n[GATK.FilterMutectCalls]  \u2190 combined with Mutect2 raw VCF\n       \u2502\n       \u25bc\nFiltered somatic VCF\n```\n\n---\n\n### 10. Implementation Roadmap\n\n1. **Phase 1 - Wrapper Development**: Write and unit-test gatk_getpileupsummaries_wrapper.sh with staging/cleanup logic\n2. **Phase 2 - Docker Testing**: Validate wrapper inside broadinstitute/gatk:4.1.4.1 container\n3. **Phase 3 - GenePattern Module Manifest**: Create module.yaml / manifest with all parameters\n4. **Phase 4 - Integration Testing**: Run full test with provided example data on GenePattern server\n5. **Phase 5 - Documentation**: Write user-facing help text and parameter descriptions\n6. **Phase 6 - Release**: Publish to GenePattern module repository",
+    "wrapper_script": "gatk_getpileupsummaries_wrapper.sh",
+    "command_line": "bash <libdir>gatk_getpileupsummaries_wrapper.sh --input.bam <input.bam> --input.bai <input.bai> --variant.vcf <variant.vcf> --variant.vcf.tbi <variant.vcf.tbi> --intervals.file <intervals.file> --intervals.index <intervals.index> --output.file.name <output.file.name> <arguments.file>",
+    "parameters": [
+      {
+        "name": "input.bam",
+        "description": "Coordinate-sorted, indexed BAM, SAM, or CRAM file containing aligned reads. The corresponding index file (BAI) must also be provided. This is passed to GATK as the -I / --input argument.",
+        "required": true,
+        "type": "file",
+        "value_count": "1..1",
+        "default_value": null,
+        "file_formats": [
+          "BAM",
+          "SAM",
+          "CRAM"
+        ],
+        "choices": null,
+        "accept_user_values": null,
+        "prefix": "--input.bam",
+        "prefix_only_if_value": false
+      },
+      {
+        "name": "input.bai",
+        "description": "Index file for the input BAM/CRAM (e.g., .bai for BAM, .crai for CRAM). Must correspond to the input.bam file. The wrapper will stage both the BAM and this index file into the writable working directory so GATK can locate the index alongside the BAM.",
+        "required": true,
+        "type": "file",
+        "value_count": "1..1",
+        "default_value": null,
+        "file_formats": [
+          "BAI",
+          "CRAI",
+          "CSI"
+        ],
+        "choices": null,
+        "accept_user_values": null,
+        "prefix": "--input.bai",
+        "prefix_only_if_value": false
+      },
+      {
+        "name": "variant.vcf",
+        "description": "bgzipped VCF file containing common germline variant sites annotated with population allele frequencies (AF INFO field). Recommended resources: small_exac_common_3.hg38.vcf.gz or af-only-gnomad.hg38.vcf.gz from the GATK resource bundle. Passed to GATK as the -V / --variant argument. Must match the genome build of the input BAM.",
+        "required": true,
+        "type": "file",
+        "value_count": "1..1",
+        "default_value": null,
+        "file_formats": [
+          "VCF",
+          "VCF.GZ",
+          "BCF"
+        ],
+        "choices": null,
+        "accept_user_values": null,
+        "prefix": "--variant.vcf",
+        "prefix_only_if_value": false
+      },
+      {
+        "name": "variant.vcf.tbi",
+        "description": "Tabix index for the variant VCF file (e.g., .vcf.gz.tbi). Must correspond to the variant.vcf file. The wrapper will stage both the VCF and this index into the writable working directory so GATK can locate the index alongside the VCF.",
+        "required": true,
+        "type": "file",
+        "value_count": "1..1",
+        "default_value": null,
+        "file_formats": [
+          "TBI",
+          "IDX"
+        ],
+        "choices": null,
+        "accept_user_values": null,
+        "prefix": "--variant.vcf.tbi",
+        "prefix_only_if_value": false
+      },
+      {
+        "name": "intervals.file",
+        "description": "Genomic intervals file specifying which sites to include in the pileup. Can be a VCF, BED, Picard interval_list, GATK interval string list (.list), or any other GATK-supported interval format. In standard practice, use the same file as variant.vcf. Passed to GATK as the -L / --intervals argument. This parameter is required even though it is not always listed as such in simplified documentation.",
+        "required": true,
+        "type": "file",
+        "value_count": "1..1",
+        "default_value": null,
+        "file_formats": [
+          "VCF",
+          "VCF.GZ",
+          "BED",
+          "LIST",
+          "INTERVAL_LIST"
+        ],
+        "choices": null,
+        "accept_user_values": null,
+        "prefix": "--intervals.file",
+        "prefix_only_if_value": false
+      },
+      {
+        "name": "intervals.index",
+        "description": "Index file for the intervals file (e.g., .vcf.gz.tbi if the intervals file is a bgzipped VCF, .idx for uncompressed VCF). Must correspond to the intervals.file. The wrapper will stage both the intervals file and this index into the writable working directory.",
+        "required": true,
+        "type": "file",
+        "value_count": "1..1",
+        "default_value": null,
+        "file_formats": [
+          "TBI",
+          "IDX"
+        ],
+        "choices": null,
+        "accept_user_values": null,
+        "prefix": "--intervals.index",
+        "prefix_only_if_value": false
+      },
+      {
+        "name": "output.file.name",
+        "description": "Name for the output pileup summary table file. This tab-separated table contains columns: contig, position, ref_count, alt_count, other_alt_count, allele_frequency. The output is used directly as input to GATK CalculateContamination.",
+        "required": true,
+        "type": "text",
+        "value_count": "1..1",
+        "default_value": "pileup_summary.table",
+        "file_formats": null,
+        "choices": null,
+        "accept_user_values": null,
+        "prefix": "--output.file.name",
+        "prefix_only_if_value": false
+      },
+      {
+        "name": "arguments.file",
+        "description": "Optional GATK arguments file containing additional parameters to pass to GetPileupSummaries (one argument or argument=value per line). Use this to specify advanced GATK options such as --tumor-sample, --max-depth-per-sample, --java-options, --tmp-dir, or any other GATK argument not exposed as an explicit module parameter. Passed to GATK as --arguments_file.",
+        "required": false,
+        "type": "file",
+        "value_count": "0..1",
+        "default_value": null,
+        "file_formats": [
+          "TXT"
+        ],
+        "choices": null,
+        "accept_user_values": null,
+        "prefix": "--arguments.file",
+        "prefix_only_if_value": true
+      }
+    ],
+    "docker_image_tag": "broadinstitute/gatk:4.1.4.1"
+  }
+}

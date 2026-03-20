@@ -1,0 +1,45 @@
+[
+    {
+        "name": "Input BAM",
+        "description": "Coordinate-sorted BAM file and its corresponding index file (.bai). Both files must be provided so GATK can locate the index alongside the BAM.",
+        "parameters": [
+            "input.bam",
+            "input.bai"
+        ],
+        "hidden": false
+    },
+    {
+        "name": "Variant Resource VCF",
+        "description": "bgzipped VCF of common germline variant sites with population allele frequencies (e.g. small_exac_common_3 or af-only-gnomad from the GATK resource bundle), plus its tabix index (.tbi). Both files must be provided.",
+        "parameters": [
+            "variant.vcf",
+            "variant.vcf.tbi"
+        ],
+        "hidden": false
+    },
+    {
+        "name": "Intervals",
+        "description": "Genomic intervals file specifying which sites to include in the pileup (can be the same file as the variant VCF), plus its index file. Both files must be provided.",
+        "parameters": [
+            "intervals.file",
+            "intervals.index"
+        ],
+        "hidden": false
+    },
+    {
+        "name": "Output",
+        "description": "Name for the output pileup summary table produced by GetPileupSummaries. This file is used as input to GATK CalculateContamination.",
+        "parameters": [
+            "output.file.name"
+        ],
+        "hidden": false
+    },
+    {
+        "name": "Advanced Options",
+        "description": "Optional GATK arguments file for passing additional parameters to GetPileupSummaries that are not exposed as explicit module parameters.",
+        "parameters": [
+            "arguments.file"
+        ],
+        "hidden": true
+    }
+]
