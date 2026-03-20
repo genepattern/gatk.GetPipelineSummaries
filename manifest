@@ -1,7 +1,7 @@
 # GenePattern Module Manifest
 
 LSID=urn:lsid:broad.mit.edu:cancer.software.genepattern.module.generated:37981:1
-name=GATK.GetPileupSummaries
+name=gatk.GetPileupSummaries
 version=1
 author=GenePattern Team
 description=Summarizes counts of reads that support reference, alternate, and other alleles for given sites. Results can be used with CalculateContamination to estimate cross-sample contamination fractions, which are then used to filter somatic variant calls produced by Mutect2. This tool is step 2 in the GATK4 Best Practices somatic variant calling pipeline.
