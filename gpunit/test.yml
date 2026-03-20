@@ -1,7 +1,7 @@
 name: "GATK.GetPileupSummaries - Basic Pileup Summaries Test"
 module: GATK.GetPileupSummaries
 params:
-  input.bam: data/normal.bam
+  input.bam: https://datasets.genepattern.org/data/module_support_files/gatk.getPipelineSummaries/normal.bam
   input.bai: data/normal.bam.bai
   variant.vcf: data/chr17_small_exac_common_3_grch38.vcf.gz
   variant.vcf.tbi: data/chr17_small_exac_common_3_grch38.vcf.gz.tbi
